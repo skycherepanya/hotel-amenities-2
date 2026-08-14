@@ -10,13 +10,6 @@ export default function App() {
   const [dbRooms, setDbRooms] = useState<RoomData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Тимчасово залишаємо локальні статуси для сумісності з поточним UI,
-  // поки не перенесемо логіку "Delivered" в базу (Таска 1.6)
-  const [cleanRooms, setCleanRooms] = useState<string[]>(() => {
-    const saved = localStorage.getItem("cleanRooms");
-    return saved ? JSON.parse(saved) : [];
-  });
-
   const [deliveredRooms, setDeliveredRooms] = useState<string[]>(() => {
     const saved = localStorage.getItem("deliveredRooms");
     return saved ? JSON.parse(saved) : [];
@@ -27,6 +20,10 @@ export default function App() {
   const [pendingDeliveryRoom, setPendingDeliveryRoom] = useState<string | null>(
     null,
   );
+
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
+    return localStorage.getItem("lastSyncTime") || null;
+  });
 
   const deliveryTimerRef = useRef<number | null>(null);
 
@@ -97,13 +94,18 @@ export default function App() {
   }, []);
 
   // 3. Збереження локальних статусів при змінах
-  useEffect(() => {
-    localStorage.setItem("cleanRooms", JSON.stringify(cleanRooms));
-  }, [cleanRooms]);
 
   useEffect(() => {
     localStorage.setItem("deliveredRooms", JSON.stringify(deliveredRooms));
   }, [deliveredRooms]);
+
+  useEffect(() => {
+    if (lastSyncTime) {
+      localStorage.setItem("lastSyncTime", lastSyncTime);
+    } else {
+      localStorage.removeItem("lastSyncTime");
+    }
+  }, [lastSyncTime]);
 
   // 4. Логіка бізнес-процесів
   const handleDeliver = async (roomNumber: string) => {
@@ -139,26 +141,41 @@ export default function App() {
     }
   };
 
-  const handleAddCleanRoom = (roomNumber: string) => {
-    if (roomNumber && !cleanRooms.includes(roomNumber)) {
-      setCleanRooms((prev) => [...prev, roomNumber]);
-    }
-  };
-
-  const handleResetDay = () => {
+  const handleResetDay = async () => {
+    // 1. Подвійний захист від випадкового кліку
+    if (!window.confirm("Are you sure you want to reset all data for the day?"))
+      return;
     if (
-      window.confirm("Are you sure you want to reset all data for the day?")
-    ) {
-      if (deliveryTimerRef.current)
-        window.clearTimeout(deliveryTimerRef.current);
-      setCleanRooms([]);
+      !window.confirm(
+        "WARNING: This will wipe today's synced progress in the database. Proceed?",
+      )
+    )
+      return;
+
+    if (deliveryTimerRef.current) window.clearTimeout(deliveryTimerRef.current);
+
+    try {
+      // 2. Робимо масовий UPDATE у базі даних
+      const { error } = await supabase
+        .from("amenities_tasks")
+        .update({ status: "pending" })
+        .eq("status", "delivered");
+
+      if (error) throw error;
+
+      // 3. Якщо база успішно оновилася, очищаємо локальний інтерфейс
       setDeliveredRooms([]);
       setViewMode("ready");
       setActiveFloor("All");
       setPendingDeliveryRoom(null);
-      localStorage.clear();
+      localStorage.removeItem("deliveredRooms");
+      setLastSyncTime(null);
 
-      // Опціонально: можна додати fetchRooms() сюди, щоб оновити дані з бази
+      alert("Базу даних успішно відкочено до ранкового стану!");
+    } catch (error) {
+      const err = error as Error;
+      console.error("Помилка скидання бази:", err.message);
+      alert("Не вдалося скинути базу даних. Перевір підключення до інтернету.");
     }
   };
 
@@ -170,19 +187,20 @@ export default function App() {
   };
 
   const roomsToDisplay = dbRooms.filter((room) => {
-    if (
-      viewMode === "ready" &&
-      (!cleanRooms.includes(room.roomNumber) ||
-        deliveredRooms.includes(room.roomNumber))
-    ) {
+    // Якщо режим "ready", ховаємо тільки ті, що ВЖЕ доставлені
+    // Всі інші автоматично вважаються чистими і готовими, бо вони зі звіту hkvacroom
+    if (viewMode === "ready" && deliveredRooms.includes(room.roomNumber)) {
       return false;
     }
+
     const floor = getRoomFloor(room.roomNumber);
     if (activeFloor !== "All" && floor !== activeFloor) {
       return false;
     }
     return true;
   });
+
+  const pendingCount = dbRooms.length - deliveredRooms.length;
 
   // 6. Відображення UI
   if (isLoading) {
@@ -201,6 +219,7 @@ export default function App() {
           setViewMode((prev) => (prev === "ready" ? "all" : "ready"))
         }
         onResetDay={handleResetDay}
+        lastSyncTime={lastSyncTime}
       />
 
       <div className="max-w-md mx-auto p-4">
@@ -208,8 +227,7 @@ export default function App() {
           <FilterBar
             activeFloor={activeFloor}
             onFloorChange={setActiveFloor}
-            onAddCleanRoom={handleAddCleanRoom}
-            cleanCount={cleanRooms.length}
+            totalPendingCount={pendingCount}
             deliveredCount={deliveredRooms.length}
           />
         </div>
