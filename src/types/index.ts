@@ -14,3 +14,12 @@ export interface RoomData {
   arrivalDate?: string;
   departureDate?: string;
 }
+
+export interface GuestData {
+  resvNameId: string;
+  room: string;
+  fullName: string;
+  vipStatus: string;
+  arrival: string;
+  preferences: string[];
+}
