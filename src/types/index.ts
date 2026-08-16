@@ -13,6 +13,8 @@ export interface RoomData {
   resvStatus?: string;
   arrivalDate?: string;
   departureDate?: string;
+  reservationId?: string;
+  status?: string;
 }
 
 export interface GuestData {

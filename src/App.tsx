@@ -6,6 +6,7 @@ import type { RoomData } from "./types";
 import { supabase } from "./api/supabaseClient";
 import { parseGuestPreferences } from "./utils/xmlParser";
 import { sampleXml } from "./utils/mockXml";
+import { syncData } from "./utils/syncData";
 
 export default function App() {
   // 1. Стан додатку (Тепер дані живуть у хмарі)
@@ -29,22 +30,18 @@ export default function App() {
 
   const deliveryTimerRef = useRef<number | null>(null);
 
-  // 2. Завантаження даних із Supabase (Таска 1.5)
-  useEffect(() => {
-    try {
-      console.log("=== ПОЧИНАЄМО ПАРСИНГ XML ===");
-      const parsedData = parseGuestPreferences(sampleXml);
-      console.log("✅ Успішно спарсено:", parsedData);
-    } catch (error) {
-      console.error("❌ Помилка парсингу:", error);
-    }
-  }, []);
-
+  // 2. Завантаження та синхронізація даних (Епік 2)
   useEffect(() => {
     let isMounted = true;
 
     const loadRooms = async () => {
       try {
+        console.log("=== ПОЧИНАЄМО ПАРСИНГ XML ===");
+        const parsedData = parseGuestPreferences(sampleXml);
+        console.log("✅ Успішно спарсено, синхронізуємо з базою...");
+        
+        await syncData(parsedData);
+
         const { data, error } = await supabase
           .from("amenities_tasks")
           .select("*")
@@ -58,6 +55,7 @@ export default function App() {
           // 1. Чесний тип: кажемо TS, що база може віддавати числа і null
           type SupabaseRow = {
             id: string | number;
+            reservation_id: string | null;
             room_number: string | number;
             guest_name: string | null;
             amenities_json: RoomData["amenities"] | null;
@@ -67,6 +65,7 @@ export default function App() {
             resv_status: string | null;
             arrival_date: string | null;
             departure_date: string | null;
+            status: string | null;
           };
 
           // 2. Жорсткий перекладач: насильно робимо рядки і пусті масиви
@@ -75,6 +74,8 @@ export default function App() {
             guestName: String(row.guest_name || "Unknown Guest"), // Якщо null -> "Unknown Guest"
             amenities: row.amenities_json || row.amenity_details || [], // Якщо null -> []
             id: String(row.id),
+            reservationId: String(row.reservation_id || ""),
+            status: row.status || "pending",
             hkStatus: row.hk_status || "",
             foStatus: row.fo_status || "",
             resvStatus: row.resv_status || "",

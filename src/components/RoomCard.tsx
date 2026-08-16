@@ -25,14 +25,21 @@ export default function RoomCard({
 
   return (
     <div
-      className={`flex items-center gap-2 p-2 border-b border-gray-100 last:border-b-0 transition-all ${
+      className={`relative flex items-center gap-2 p-2 border-b border-gray-100 last:border-b-0 transition-all ${
         isDelivered
           ? "bg-green-50 opacity-60"
           : isPending
             ? "opacity-50"
-            : "bg-white"
+            : room.status === "room_move"
+              ? "bg-red-50 border-red-400 border-l-4"
+              : "bg-white"
       }`}
     >
+      {room.status === "room_move" && !isDelivered && (
+        <div className="absolute top-0 right-0 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-bl shadow-sm z-10">
+          КІМНАТУ ЗМІНЕНО
+        </div>
+      )}
       {/* Ліва частина: Номер кімнати та теги */}
       <div className="shrink-0 w-18">
         <div
