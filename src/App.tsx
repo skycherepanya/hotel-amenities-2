@@ -5,7 +5,6 @@ import RoomCard from "./components/RoomCard";
 import type { RoomData } from "./types";
 import { supabase } from "./api/supabaseClient";
 import { parseGuestPreferences } from "./utils/xmlParser";
-import { sampleXml } from "./utils/mockXml";
 import { syncData } from "./utils/syncData";
 
 export default function App() {
@@ -30,83 +29,118 @@ export default function App() {
 
   const deliveryTimerRef = useRef<number | null>(null);
 
-  // 2. Завантаження та синхронізація даних (Епік 2)
-  useEffect(() => {
-    let isMounted = true;
+  const fetchRooms = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("amenities_tasks")
+        .select("*")
+        .order("room_number", { ascending: true });
 
-    const loadRooms = async () => {
-      try {
-        console.log("=== ПОЧИНАЄМО ПАРСИНГ XML ===");
-        const parsedData = parseGuestPreferences(sampleXml);
-        console.log("✅ Успішно спарсено, синхронізуємо з базою...");
-        
-        await syncData(parsedData);
+      if (error) throw error;
 
-        const { data, error } = await supabase
-          .from("amenities_tasks")
-          .select("*")
-          .order("room_number", { ascending: true });
+      if (data) {
+        type SupabaseRow = {
+          id: number;
+          room_number: string;
+          guest_name: string;
+          amenities_json: any;
+          hk_status: string | null;
+          fo_status: string | null;
+          resv_status: string | null;
+          arrival_date: string | null;
+          departure_date: string | null;
+          reservation_id: string | null;
+          status: string | null;
+          vip_status: string | null;
+        };
 
-        console.log(data);
+        const formattedRooms = ((data as SupabaseRow[]) || []).map((row) => {
+          const rawAmenities = row.amenities_json || [];
+          const parsedAmenities = rawAmenities.map((a: any) =>
+            typeof a === "string" ? { name: a } : a,
+          );
 
-        if (error) throw error;
-
-        if (isMounted) {
-          // 1. Чесний тип: кажемо TS, що база може віддавати числа і null
-          type SupabaseRow = {
-            id: string | number;
-            reservation_id: string | null;
-            room_number: string | number;
-            guest_name: string | null;
-            amenities_json: RoomData["amenities"] | null;
-            amenity_details?: RoomData["amenities"] | null;
-            hk_status: string | null;
-            fo_status: string | null;
-            resv_status: string | null;
-            arrival_date: string | null;
-            departure_date: string | null;
-            status: string | null;
-          };
-
-          // 2. Жорсткий перекладач: насильно робимо рядки і пусті масиви
-          const formattedRooms = ((data as SupabaseRow[]) || []).map((row) => ({
-            roomNumber: String(row.room_number || ""), // Примусово число 505 -> "505"
-            guestName: String(row.guest_name || "Unknown Guest"), // Якщо null -> "Unknown Guest"
-            amenities: row.amenities_json || row.amenity_details || [], // Якщо null -> []
+          return {
             id: String(row.id),
-            reservationId: String(row.reservation_id || ""),
-            status: row.status || "pending",
+            roomNumber: String(row.room_number || "Unknown").padStart(3, "0"),
+            guestName: row.guest_name || "Guest",
+            amenities: parsedAmenities,
             hkStatus: row.hk_status || "",
             foStatus: row.fo_status || "",
             resvStatus: row.resv_status || "",
             arrivalDate: row.arrival_date || "",
             departureDate: row.departure_date || "",
-          }));
+            reservationId: row.reservation_id || "",
+            status: row.status || "pending",
+            vipStatus: row.vip_status || "",
+          };
+        });
 
-          setDbRooms(formattedRooms);
-        }
-      } catch (error) {
-        const err = error as Error;
-        console.error("Помилка завантаження з Supabase:", err.message);
-        if (isMounted) {
-          alert("Не вдалося завантажити дані з бази.");
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        // Групування за номером кімнати
+        const groupedRoomsMap = new Map<string, RoomData>();
+
+        formattedRooms.forEach((room) => {
+          if (!groupedRoomsMap.has(room.roomNumber)) {
+            groupedRoomsMap.set(room.roomNumber, { ...room });
+          } else {
+            const existing = groupedRoomsMap.get(room.roomNumber)!;
+
+            // Об'єднуємо імена, якщо вони різні
+            if (!existing.guestName.includes(room.guestName)) {
+              existing.guestName = `${existing.guestName} / ${room.guestName}`;
+            }
+
+            // Об'єднуємо VIP статуси
+            if (!existing.vipStatus && room.vipStatus) {
+              existing.vipStatus = room.vipStatus;
+            } else if (existing.vipStatus && room.vipStatus && !existing.vipStatus.includes(room.vipStatus)) {
+              existing.vipStatus = `${existing.vipStatus} & ${room.vipStatus}`;
+            }
+
+            // Додаємо аменіті
+            existing.amenities = [...existing.amenities, ...room.amenities];
+          }
+        });
+
+        const finalRooms = Array.from(groupedRoomsMap.values());
+        setDbRooms(finalRooms as RoomData[]);
       }
-    };
+    } catch (error) {
+      const err = error as Error;
+      console.error("Помилка завантаження з Supabase:", err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    loadRooms();
+  // 2. Завантаження та синхронізація даних
+  useEffect(() => {
+    fetchRooms();
+  }, []);
 
-    return () => {
-      isMounted = false;
-    };
+  // FOR TESTING ONLY (Epic 3 Automation Test)
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as any).runTestSync = async () => {
+        try {
+          console.log("🧪 Запуск тестової синхронізації...");
+          const guest1 = (await import('./.data/guest_preferences42254417.xml?raw')).default;
+          const guest2 = (await import('./.data/guest_preferences42254638.xml?raw')).default;
+
+          const guests = [...parseGuestPreferences(guest1), ...parseGuestPreferences(guest2)];
+
+          await syncData(guests);
+          await fetchRooms();
+          console.log("✅ ТЕСТОВА СИНХРОНІЗАЦІЯ ЗАВЕРШЕНА!");
+        } catch (e) {
+          console.error("❌ Помилка тесту:", e);
+        }
+      };
+      console.log("💡 Підказка: Викличте runTestSync() в консолі розробника, щоб протестувати файли.");
+    }
   }, []);
 
   // 3. Збереження локальних статусів при змінах
-
   useEffect(() => {
     localStorage.setItem("deliveredRooms", JSON.stringify(deliveredRooms));
   }, [deliveredRooms]);
@@ -127,15 +161,13 @@ export default function App() {
     setPendingDeliveryRoom(roomNumber);
 
     try {
-      // 1. Робимо UPDATE запит до Supabase
       const { error } = await supabase
         .from("amenities_tasks")
         .update({ status: "delivered" })
-        .eq("room_number", roomNumber); // Шукаємо конкретну кімнату
+        .eq("room_number", roomNumber);
 
       if (error) throw error;
 
-      // 2. Якщо база успішно оновилася, застосовуємо наш візуальний фідбек
       if (deliveryTimerRef.current)
         window.clearTimeout(deliveryTimerRef.current);
 
@@ -146,15 +178,12 @@ export default function App() {
     } catch (error) {
       const err = error as Error;
       console.error("Помилка оновлення статусу:", err.message);
-      alert("Не вдалося зберегти статус у базі даних.");
-
-      // Скидаємо стан "завантаження" для кнопки, якщо сталася помилка
+      alert("Failed to save status to the database.");
       setPendingDeliveryRoom(null);
     }
   };
 
   const handleResetDay = async () => {
-    // 1. Подвійний захист від випадкового кліку
     if (!window.confirm("Are you sure you want to reset all data for the day?"))
       return;
     if (
@@ -167,7 +196,6 @@ export default function App() {
     if (deliveryTimerRef.current) window.clearTimeout(deliveryTimerRef.current);
 
     try {
-      // 2. Робимо масовий UPDATE у базі даних
       const { error } = await supabase
         .from("amenities_tasks")
         .update({ status: "pending" })
@@ -175,7 +203,6 @@ export default function App() {
 
       if (error) throw error;
 
-      // 3. Якщо база успішно оновилася, очищаємо локальний інтерфейс
       setDeliveredRooms([]);
       setViewMode("ready");
       setActiveFloor("All");
@@ -183,24 +210,23 @@ export default function App() {
       localStorage.removeItem("deliveredRooms");
       setLastSyncTime(null);
 
-      alert("Базу даних успішно відкочено до ранкового стану!");
+      alert("Database successfully reset to morning state!");
+      await fetchRooms();
     } catch (error) {
       const err = error as Error;
-      console.error("Помилка скидання бази:", err.message);
-      alert("Не вдалося скинути базу даних. Перевір підключення до інтернету.");
+      console.error("Error resetting database:", err.message);
+      alert("Failed to reset database. Please check your internet connection.");
     }
   };
 
   // 5. Фільтрація карток для відображення
-  const getRoomFloor = (roomNumber: string) => {
-    const normalized = roomNumber.trim();
+  const getRoomFloor = (roomNumber: string | number) => {
+    const normalized = String(roomNumber).trim();
     if (normalized.startsWith("0")) return "M";
     return normalized.charAt(0);
   };
 
   const roomsToDisplay = dbRooms.filter((room) => {
-    // Якщо режим "ready", ховаємо тільки ті, що ВЖЕ доставлені
-    // Всі інші автоматично вважаються чистими і готовими, бо вони зі звіту hkvacroom
     if (viewMode === "ready" && deliveredRooms.includes(room.roomNumber)) {
       return false;
     }
@@ -217,8 +243,8 @@ export default function App() {
   // 6. Відображення UI
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-blue-600 font-medium">
-        Завантаження бази...
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 text-slate-500 font-medium">
+        Loading database...
       </div>
     );
   }
@@ -244,15 +270,15 @@ export default function App() {
           />
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden divide-y divide-gray-100">
+        <div className="flex flex-col gap-3">
           {roomsToDisplay.length === 0 ? (
-            <div className="p-8 text-center text-gray-500 font-medium bg-gray-50">
-              No rooms match the current filter.
+            <div className="p-8 text-center text-slate-500 font-medium bg-white rounded-xl border border-gray-200 shadow-sm">
+              No rooms to display for this filter.
             </div>
           ) : (
             roomsToDisplay.map((room) => (
               <RoomCard
-                key={room.roomNumber} // Якщо в базі є ID, краще використовувати room.id
+                key={room.id}
                 room={room}
                 isDelivered={deliveredRooms.includes(room.roomNumber)}
                 isPending={pendingDeliveryRoom === room.roomNumber}

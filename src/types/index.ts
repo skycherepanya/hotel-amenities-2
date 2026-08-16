@@ -1,3 +1,5 @@
+import type { Key } from "react";
+
 export interface Amenity {
   name: string;
   time: string | null;
@@ -5,9 +7,11 @@ export interface Amenity {
 }
 
 export interface RoomData {
+  id: Key;
   roomNumber: string;
   guestName: string;
   amenities: Amenity[];
+  vipStatus?: string;
   hkStatus?: string;
   foStatus?: string;
   resvStatus?: string;
