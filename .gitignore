@@ -28,3 +28,4 @@ action_plan.md
 .agents/
 skills-lock.json
 .claude/
+.data/
