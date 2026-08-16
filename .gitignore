@@ -25,3 +25,6 @@ dist-ssr
 PROJECT_KNOWLEDGE.md
 action_plan.md
 .env
+.agents/
+skills-lock.json
+.claude/
