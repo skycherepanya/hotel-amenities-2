@@ -3,7 +3,9 @@ import Header from "./components/Header";
 import FilterBar from "./components/FilterBar";
 import RoomCard from "./components/RoomCard";
 import type { RoomData } from "./types";
-import { supabase } from "./api/supabaseClient"; // Підключаємо твій клієнт Supabase
+import { supabase } from "./api/supabaseClient";
+import { parseGuestPreferences } from "./utils/xmlParser";
+import { sampleXml } from "./utils/mockXml";
 
 export default function App() {
   // 1. Стан додатку (Тепер дані живуть у хмарі)
@@ -28,6 +30,15 @@ export default function App() {
   const deliveryTimerRef = useRef<number | null>(null);
 
   // 2. Завантаження даних із Supabase (Таска 1.5)
+  useEffect(() => {
+    try {
+      console.log("=== ПОЧИНАЄМО ПАРСИНГ XML ===");
+      const parsedData = parseGuestPreferences(sampleXml);
+      console.log("✅ Успішно спарсено:", parsedData);
+    } catch (error) {
+      console.error("❌ Помилка парсингу:", error);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
