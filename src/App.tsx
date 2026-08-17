@@ -6,11 +6,13 @@ import type { RoomData } from "./types";
 import { supabase } from "./api/supabaseClient";
 import { parseGuestPreferences } from "./utils/xmlParser";
 import { syncData } from "./utils/syncData";
+import { parseHkRooms, syncRoomsToDb } from "./utils/syncRooms";
 
 export default function App() {
   // 1. Стан додатку (Тепер дані живуть у хмарі)
   const [dbRooms, setDbRooms] = useState<RoomData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [simulatedToday, setSimulatedToday] = useState<string>("17-AUG-26");
 
   const [deliveredRooms, setDeliveredRooms] = useState<string[]>(() => {
     const saved = localStorage.getItem("deliveredRooms");
@@ -31,14 +33,19 @@ export default function App() {
 
   const fetchRooms = async () => {
     try {
-      const { data, error } = await supabase
-        .from("amenities_tasks")
-        .select("*")
-        .order("room_number", { ascending: true });
+      const [tasksRes, roomsRes] = await Promise.all([
+        supabase.from("amenities_tasks").select("*").order("room_number", { ascending: true }),
+        supabase.from("rooms").select("*")
+      ]);
 
-      if (error) throw error;
+      if (tasksRes.error) throw tasksRes.error;
+      if (roomsRes.error) throw roomsRes.error;
 
-      if (data) {
+      if (tasksRes.data) {
+        // Map hk_status from rooms table
+        const roomsMap = new Map();
+        (roomsRes.data || []).forEach(r => roomsMap.set(r.room_number, r.hk_status));
+
         type SupabaseRow = {
           id: number;
           room_number: string;
@@ -54,7 +61,29 @@ export default function App() {
           vip_status: string | null;
         };
 
-        const formattedRooms = ((data as SupabaseRow[]) || []).map((row) => {
+        const toDbDate = (operaDate: string) => {
+          if (!operaDate) return "";
+          const parts = operaDate.split('-');
+          if (parts.length !== 3) return operaDate;
+          const day = parts[0].padStart(2, '0');
+          const monthStr = parts[1].toUpperCase();
+          const year = "20" + parts[2];
+          const months: Record<string, string> = {
+            'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
+            'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+          };
+          return `${year}-${months[monthStr] || '01'}-${day}`;
+        };
+
+        const dbSimulatedToday = toDbDate(simulatedToday);
+
+        const activeTasks = ((tasksRes.data as SupabaseRow[]) || []).filter((row) => {
+          // Показуємо ТІЛЬКИ ті завдання, де дата заїзду збігається з сьогоднішньою датою.
+          // Гості, які заїхали вчора і досі in-house, нас більше не цікавлять.
+          return row.arrival_date === dbSimulatedToday;
+        });
+
+        const formattedRooms = activeTasks.map((row) => {
           const rawAmenities = row.amenities_json || [];
           const parsedAmenities = rawAmenities.map((a: any) =>
             typeof a === "string" ? { name: a } : a,
@@ -65,7 +94,7 @@ export default function App() {
             roomNumber: String(row.room_number || "Unknown").padStart(3, "0"),
             guestName: row.guest_name || "Guest",
             amenities: parsedAmenities,
-            hkStatus: row.hk_status || "",
+            hkStatus: roomsMap.get(row.room_number) || row.hk_status || "",
             foStatus: row.fo_status || "",
             resvStatus: row.resv_status || "",
             arrivalDate: row.arrival_date || "",
@@ -119,24 +148,10 @@ export default function App() {
   }, []);
 
   // FOR TESTING ONLY (Epic 3 Automation Test)
+  // Відключено, оскільки фізичні файли видалені для ручного тестування
   useEffect(() => {
     if (import.meta.env.DEV) {
-      (window as any).runTestSync = async () => {
-        try {
-          console.log("🧪 Запуск тестової синхронізації...");
-          const guest1 = (await import('./.data/guest_preferences42254417.xml?raw')).default;
-          const guest2 = (await import('./.data/guest_preferences42254638.xml?raw')).default;
-
-          const guests = [...parseGuestPreferences(guest1), ...parseGuestPreferences(guest2)];
-
-          await syncData(guests);
-          await fetchRooms();
-          console.log("✅ ТЕСТОВА СИНХРОНІЗАЦІЯ ЗАВЕРШЕНА!");
-        } catch (e) {
-          console.error("❌ Помилка тесту:", e);
-        }
-      };
-      console.log("💡 Підказка: Викличте runTestSync() в консолі розробника, щоб протестувати файли.");
+      console.log("💡 Підказка: Використовуйте кнопки 'Завантажити XML' на фіолетовій панелі для завантаження звітів.");
     }
   }, []);
 
@@ -226,7 +241,9 @@ export default function App() {
     return normalized.charAt(0);
   };
 
-  const roomsToDisplay = dbRooms.filter((room) => {
+  const validRooms = dbRooms.filter((room) => room.vipStatus && room.vipStatus.trim() !== "");
+
+  const roomsToDisplay = validRooms.filter((room) => {
     if (viewMode === "ready" && deliveredRooms.includes(room.roomNumber)) {
       return false;
     }
@@ -238,7 +255,10 @@ export default function App() {
     return true;
   });
 
-  const pendingCount = dbRooms.length - deliveredRooms.length;
+  const validDeliveredCount = validRooms.filter((room) =>
+    deliveredRooms.includes(room.roomNumber)
+  ).length;
+  const pendingCount = validRooms.length - validDeliveredCount;
 
   // 6. Відображення UI
   if (isLoading) {
@@ -251,6 +271,61 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
+      {import.meta.env.DEV && (
+        <div className="bg-purple-600 text-white p-2 flex flex-col gap-2 items-center text-xs">
+          <div className="flex justify-center items-center gap-2">
+            <span>DEV MODE: Симуляція дати</span>
+            <select 
+              value={simulatedToday}
+              onChange={(e) => {
+                setSimulatedToday(e.target.value);
+                setTimeout(fetchRooms, 0); 
+              }}
+              className="bg-purple-800 text-white px-2 py-1 rounded"
+            >
+              <option value="14-AUG-26">14 Серпня</option>
+              <option value="15-AUG-26">15 Серпня</option>
+              <option value="16-AUG-26">16 Серпня</option>
+              <option value="17-AUG-26">17 Серпня</option>
+            </select>
+          </div>
+          <div className="flex gap-4 items-center">
+            <label className="cursor-pointer bg-purple-700 hover:bg-purple-800 px-2 py-1 rounded border border-purple-400">
+              📁 Завантажити Guests XML
+              <input 
+                type="file" 
+                accept=".xml"
+                className="hidden" 
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const text = await file.text();
+                  const guests = parseGuestPreferences(text);
+                  await syncData(guests, simulatedToday);
+                  await fetchRooms();
+                  e.target.value = ''; // reset input
+                }} 
+              />
+            </label>
+            <label className="cursor-pointer bg-purple-700 hover:bg-purple-800 px-2 py-1 rounded border border-purple-400">
+              🧹 Завантажити Rooms XML
+              <input 
+                type="file" 
+                accept=".xml"
+                className="hidden" 
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const text = await file.text();
+                  await syncRoomsToDb(parseHkRooms(text));
+                  await fetchRooms();
+                  e.target.value = ''; // reset input
+                }} 
+              />
+            </label>
+          </div>
+        </div>
+      )}
       <Header
         viewMode={viewMode}
         onToggleView={() =>
@@ -261,12 +336,12 @@ export default function App() {
       />
 
       <div className="max-w-md mx-auto p-4">
-        <div className="sticky top-18 z-10 mb-6 bg-white p-4 rounded-xl shadow-md border border-gray-200">
+        <div className="sticky top-[88px] z-40 mb-6 bg-white p-4 rounded-xl shadow-md border border-gray-200">
           <FilterBar
             activeFloor={activeFloor}
             onFloorChange={setActiveFloor}
             totalPendingCount={pendingCount}
-            deliveredCount={deliveredRooms.length}
+            deliveredCount={validDeliveredCount}
           />
         </div>
 

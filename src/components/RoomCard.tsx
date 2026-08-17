@@ -53,9 +53,24 @@ export default function RoomCard({
           >
             {displayRoomNumber}
           </div>
+          {room.hkStatus && (
+            <span className={`ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
+              room.hkStatus === 'Clean' ? 'bg-emerald-100 text-emerald-700' :
+              room.hkStatus === 'Inspected' ? 'bg-blue-100 text-blue-700' :
+              room.hkStatus === 'Dirty' ? 'bg-rose-100 text-rose-700' :
+              'bg-gray-100 text-gray-700'
+            }`}>
+              {room.hkStatus}
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-1">
+          {room.resvStatus === "CKIN" && (
+            <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shadow-sm border border-black/5 bg-indigo-100 text-indigo-700">
+              IH
+            </span>
+          )}
           {room.vipStatus && (
             <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shadow-sm border border-black/5 ${getAmenityColor("VIP " + room.vipStatus)}`}>
               VIP {room.vipStatus}
@@ -103,12 +118,14 @@ export default function RoomCard({
       <button
         type="button"
         onClick={() => onDeliver(room.roomNumber)}
-        disabled={isDelivered || isPending}
+        disabled={isDelivered || isPending || room.hkStatus === 'Dirty'}
         className={`shrink-0 w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 ml-2 ${isDelivered
           ? "bg-emerald-100 text-emerald-600 cursor-default"
           : isPending
             ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-            : "bg-gradient-to-br from-emerald-400 to-emerald-500 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-md hover:shadow-lg hover:scale-105 active:scale-95"
+            : room.hkStatus === 'Dirty'
+              ? "bg-rose-50 text-rose-300 border border-rose-200 cursor-not-allowed opacity-60"
+              : "bg-gradient-to-br from-emerald-400 to-emerald-500 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-md hover:shadow-lg hover:scale-105 active:scale-95"
           }`}
       >
         <Check className={`w-6 h-6 ${isDelivered ? "opacity-100" : "opacity-90"}`} strokeWidth={isDelivered ? 3 : 2.5} />

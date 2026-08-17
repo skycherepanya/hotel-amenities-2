@@ -1,13 +1,13 @@
 import { supabase } from '../api/supabaseClient';
 import type { GuestData } from '../types';
 
-export async function syncData(newParsedData: GuestData[]) {
+export async function syncData(newParsedData: GuestData[], simulatedTodayStr?: string) {
   console.log("🔄 Починаємо синхронізацію з базою даних...", newParsedData.length, "записів");
 
   // 1. Отримуємо існуючі записи
   const { data: existingTasks, error: fetchError } = await supabase
     .from('amenities_tasks')
-    .select('id, reservation_id, room_number, status');
+    .select('id, reservation_id, room_number, status, arrival_date');
 
   if (fetchError) {
     console.error('❌ Помилка завантаження з бази під час синхронізації:', fetchError);
@@ -46,6 +46,7 @@ export async function syncData(newParsedData: GuestData[]) {
           amenities_json: [],
           vip_status: guest.vipStatus,
           arrival_date: guest.arrival,
+          resv_status: guest.resvStatus || null,
           status: 'pending' // Нове завдання завжди pending
         });
 
@@ -59,13 +60,21 @@ export async function syncData(newParsedData: GuestData[]) {
       const updatePayload: any = {
         guest_name: guest.fullName,
         amenities_json: [], // Clear any garbage OTA BOOKING tags
-        vip_status: guest.vipStatus
+        vip_status: guest.vipStatus,
+        resv_status: guest.resvStatus || null
       };
 
       if (String(existing.room_number) !== String(guest.room)) {
-        console.log(`⚠️ Кімнату змінено для ${guest.fullName}: ${existing.room_number} -> ${guest.room}`);
         updatePayload.room_number = guest.room;
-        updatePayload.status = 'room_move';
+        
+        // Переміщення кімнат ловимо тільки для сьогоднішніх заїздів, або якщо завдання ще не виконано
+        const isToday = simulatedTodayStr ? (guest.arrival === simulatedTodayStr) : true;
+        if (existing.status !== 'delivered' || isToday) {
+          console.log(`⚠️ Кімнату змінено для ${guest.fullName}: ${existing.room_number} -> ${guest.room}`);
+          updatePayload.status = 'room_move';
+        } else {
+          console.log(`ℹ️ Ігноруємо room move для старих гостей (${guest.fullName}), аменіті вже доставлено.`);
+        }
       }
 
       const { error: updateError } = await supabase

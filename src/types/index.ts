@@ -27,5 +27,5 @@ export interface GuestData {
   fullName: string;
   vipStatus: string;
   arrival: string;
-  preferences: string[];
+  resvStatus?: string;
 }

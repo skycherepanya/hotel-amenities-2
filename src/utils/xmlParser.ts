@@ -19,6 +19,7 @@ export function parseGuestPreferences(xmlString: string): GuestData[] {
     const fullName = node.getElementsByTagName("FULL_NAME")[0]?.textContent?.trim() || "";
     const vipStatus = node.getElementsByTagName("VIP_STATUS")[0]?.textContent?.trim() || "";
     const arrival = node.getElementsByTagName("ARRIVAL")[0]?.textContent?.trim() || "";
+    const resStatus = node.getElementsByTagName("RES_STATUS")[0]?.textContent?.trim() || "";
 
     // Якщо це пуста кімната або немає ID - пропускаємо
     if (!resvNameId || !room) continue;
@@ -37,7 +38,7 @@ export function parseGuestPreferences(xmlString: string): GuestData[] {
         fullName: cleanFullName,
         vipStatus,
         arrival,
-        preferences: [] // We don't save preferences anymore, using vip_status column
+        resvStatus: resStatus
       });
     }
   }

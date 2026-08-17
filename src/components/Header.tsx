@@ -14,7 +14,7 @@ export default function Header({
   lastSyncTime,
 }: HeaderProps) {
   return (
-    <div className="bg-white shadow-sm p-4 sticky top-0 z-20">
+    <div className="bg-white shadow-sm p-4 sticky top-0 z-50">
       <div className="flex justify-between items-center mb-2">
         <h1 className="text-xl font-bold text-gray-800">Hotel Amenities</h1>
 
