@@ -1,4 +1,5 @@
-import { RefreshCw, Clock } from "lucide-react";
+import { RefreshCw, Clock, LogOut } from "lucide-react";
+import { supabase } from "../api/supabaseClient";
 
 interface HeaderProps {
   viewMode: "ready" | "all";
@@ -37,6 +38,14 @@ export default function Header({
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Reset Day
+          </button>
+
+          {/* Кнопка виходу */}
+          <button
+            onClick={async () => await supabase.auth.signOut()}
+            className="text-gray-600 flex items-center text-sm font-medium border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-100"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>

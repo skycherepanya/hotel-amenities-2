@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import Header from "./components/Header";
 import FilterBar from "./components/FilterBar";
 import RoomCard from "./components/RoomCard";
+import Login from "./components/Login";
+import type { User } from "@supabase/supabase-js";
 import type { RoomData } from "./types";
 import { supabase } from "./api/supabaseClient";
 import { parseGuestPreferences } from "./utils/xmlParser";
@@ -12,6 +14,7 @@ export default function App() {
   // 1. Стан додатку (Тепер дані живуть у хмарі)
   const [dbRooms, setDbRooms] = useState<RoomData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
   const [simulatedToday, setSimulatedToday] = useState<string>("17-AUG-26");
 
   const [deliveredRooms, setDeliveredRooms] = useState<string[]>(() => {
@@ -142,10 +145,27 @@ export default function App() {
     }
   };
 
-  // 2. Завантаження та синхронізація даних
+  // 2. Auth state and session listener
   useEffect(() => {
-    fetchRooms();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  // 3. Завантаження та синхронізація даних
+  useEffect(() => {
+    if (user) {
+      fetchRooms();
+    }
+  }, [user]);
 
   // FOR TESTING ONLY (Epic 3 Automation Test)
   // Відключено, оскільки фізичні файли видалені для ручного тестування
@@ -261,6 +281,10 @@ export default function App() {
   const pendingCount = validRooms.length - validDeliveredCount;
 
   // 6. Відображення UI
+  if (!user) {
+    return <Login />;
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50 text-slate-500 font-medium">
